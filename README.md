@@ -9,7 +9,7 @@ Bi-LSTM-CRF：实现双向LSTM+CRF的中文分词模型
 
 CBOW_Embeddings：粗略尝试中文embeddings
 
-CNN：使用tensorflow重构本科毕业设计人脸表情识别代码，并尝试使用bagging
+CNN：使用tensorflow重构本科毕业设计人脸表情识别代码，并使用了bagging
 
 cnn_sentence2vec：简单复现“Learning Semantic Representations Using Convolutional Neural Networks for Web Search ”
 
