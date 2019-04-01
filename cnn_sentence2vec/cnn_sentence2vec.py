@@ -33,6 +33,7 @@ texts = text_helpers.normalize_text(texts, stops)
 target = [target[ix] for ix, x in enumerate(texts) if len(x.split()) > 2]
 texts = [x for x in texts if len(x.split()) > 2]
 texts = text_helpers.text_to_numbers(texts, word_dict)
+max_len = max([len(x) for x in texts])
 sentences_embed = []
 for x in texts:
     sentence_embed = np.array([embed[y] for y in x])
@@ -66,8 +67,8 @@ b_bais = tf.Variable(tf.zeros(shape=[1, 1], dtype=tf.float32))
 
 conv1 = tf.nn.conv2d(tf.expand_dims(x_input, 3), conv1_weight, strides=[1, 1, 1, 1], padding='VALID')
 relu1 = tf.nn.relu(tf.nn.bias_add(conv1, conv1_bias))
-max_pool = tf.reduce_max(relu1, axis=1, keepdims=True)
-full1_input = tf.squeeze(max_pool, axis=[1, 2])
+max_pool = tf.nn.max_pool(relu1, [1, max_len+1-n_gram, 1, 1], [1, 1, 1, 1], padding="VALID")
+full1_input = tf.reshape(max_pool, [-1, conv_features])
 sentence_vec_output = tf.add(tf.matmul(full1_input, full1_weight), full1_bais)
 model_output = tf.add(tf.matmul(sentence_vec_output, W_weight), b_bais)
 loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=model_output, labels=y_target))
