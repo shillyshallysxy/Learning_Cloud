@@ -19,6 +19,8 @@ FastText:复现 “Enriching Word Vectors with Subword Information”
 
 glove：复现glove模型，暂时搁置
 
+house_price_predict：实训时的房价预测系统
+
 doc2vec:复现 “Distributed Representations of Sentences and Documents”
 
 Sentence2vec:复现 “A SIMPLE BUT TOUGH-TO-BEAT BASELINE FOR SENTENCE EMBEDDINGS”
