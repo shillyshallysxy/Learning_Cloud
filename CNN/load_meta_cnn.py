@@ -35,7 +35,7 @@ saver = tf.train.import_meta_graph(ckpt_path+'.meta')
 saver.restore(sess, ckpt_path)
 graph = tf.get_default_graph()
 name = [n.name for n in graph.as_graph_def().node]
-print(name)
+# print(name)
 x_input = graph.get_tensor_by_name('x_input:0')
 dropout = graph.get_tensor_by_name('dropout:0')
 logits = graph.get_tensor_by_name('project/output/logits:0')
