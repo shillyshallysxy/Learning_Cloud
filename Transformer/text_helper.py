@@ -103,6 +103,7 @@ def load_data(folder_name='G:\python\DeepLearning\Learning_NLP\\temp\cn_nlp\corp
     cn_data = []
     cn_len = []
     temp = {}
+    max_len = 50
     for dir_name in os.listdir(folder_name):
         for file_name in os.listdir(os.path.join(folder_name, dir_name)):
             dirs.append(os.path.join(folder_name, dir_name, file_name))
@@ -116,7 +117,7 @@ def load_data(folder_name='G:\python\DeepLearning\Learning_NLP\\temp\cn_nlp\corp
                 else:
                     temp[2] = str_
                     temp[3] = len(str_)
-                    if temp[1] < 200 and temp[3] < 200:
+                    if temp[1] < max_len and temp[3] < max_len:
                         en_data.append(temp[0])
                         en_len.append(temp[1])
                         cn_data.append(temp[2])
@@ -132,6 +133,7 @@ def load_test_data(folder_name=
     cn_data = []
     cn_len = []
     temp = {}
+    max_len = 50
     with open(folder_name, 'r', encoding='utf-8') as f:
         for index, line in enumerate(f):
             str_ = line.encode('utf-8', errors='ignore').decode().rstrip()
@@ -141,7 +143,7 @@ def load_test_data(folder_name=
             else:
                 temp[2] = str_
                 temp[3] = len(str_)
-                if temp[1] < 200 and temp[3] < 200:
+                if temp[1] < max_len and temp[3] < max_len:
                     en_data.append(temp[0])
                     en_len.append(temp[1])
                     cn_data.append(temp[2])

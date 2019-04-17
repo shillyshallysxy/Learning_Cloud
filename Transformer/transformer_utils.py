@@ -79,8 +79,8 @@ def get_positional_encoding(inputs, channels, scope="positional_embedding", reus
     :param reuse: [Boolean] tf parameter reuse
     :return: [Tensor] outputs after positional encoding
     """
-    N, T = inputs.get_shape().as_list()
-
+    N = tf.shape(inputs)[0]
+    T = tf.shape(inputs)[1]
     with tf.variable_scope(scope, reuse=reuse):
         position_signal = get_timing_signal_1d(T, channels)
         position_signal = tf.tile(position_signal, [N, 1, 1])
@@ -97,7 +97,7 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
     :param start_index: [Int] index of first position
     :return: [Tensor] positional encoding of shape "1 * length * channels"
     """
-    position = tf.to_float(tf.range(length) + start_index)
+    position = tf.to_float(tf.range(start_index, length))
     num_timescales = channels // 2
     log_timescale_increment = (math.log(float(min_timescale) / float(max_timescale)) /
                                (tf.to_float(num_timescales) - 1))
@@ -106,7 +106,7 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
     scaled_time = tf.expand_dims(position, 1) * tf.expand_dims(inv_timescales, 0)
     signal = tf.concat([tf.sin(scaled_time), tf.cos(scaled_time)], axis=1)
     signal = tf.pad(signal, [[0, 0], [0, tf.mod(channels, 2)]])
-    signal = tf.reshape(signal, [1, length, channels])
+    signal = tf.expand_dims(signal, axis=0)
     return signal
 
 
@@ -126,6 +126,8 @@ def get_embedding(inputs, vocab_size, channels, scale=True, scope="embedding", r
                                        dtype=tf.float32,
                                        shape=[vocab_size, channels],
                                        initializer=tf.contrib.layers.xavier_initializer())
+        lookup_table = tf.concat((tf.zeros(shape=[1, channels], dtype=tf.float32),
+                                  lookup_table[1:, :]), 0)
 
         outputs = tf.nn.embedding_lookup(lookup_table, inputs)
 
@@ -135,13 +137,15 @@ def get_embedding(inputs, vocab_size, channels, scale=True, scope="embedding", r
     return outputs
 
 
-def multi_head_attention(from_tensor: tf.Tensor,  to_tensor: tf.Tensor, channels=None, num_heads=8, dropout_rate=0,
-                         is_training=True, causality=False, scope="multihead_attention", activation=None, reuse=None):
+def multi_head_attention(from_tensor: tf.Tensor,  to_tensor: tf.Tensor, channels=None, num_units=None, num_heads=8,
+                         dropout_rate=0, is_training=True, causality=False, scope="multihead_attention",
+                         activation=None, reuse=None):
     """
     multihead attention
     :param from_tensor: [Tensor] query matrix
     :param to_tensor: [Tensor] key matrix
-    :param channels: [Int] channel size of matrix Q, K, V
+    :param channels: [Int] channel of last dimension of output
+    :param num_units: [Int] channel size of matrix Q, K, V
     :param num_heads: [Int] head number of attention
     :param dropout_rate: [Float] dropout rate when 0 means no dropout
     :param is_training: [Boolean] whether it is training, If true, use dropout
@@ -154,11 +158,13 @@ def multi_head_attention(from_tensor: tf.Tensor,  to_tensor: tf.Tensor, channels
     with tf.variable_scope(scope, reuse=reuse):
         if channels is None:
             channels = from_tensor.get_shape().as_list()[-1]
+        if num_units is None:
+            num_units = channels//num_heads
         activation_fn = get_activation(activation)
         # shape [batch_size, max_length, channels*num_heads]
-        query_layer = tf.layers.dense(from_tensor, channels * num_heads, activation=activation_fn)
-        key_layer = tf.layers.dense(to_tensor, channels * num_heads, activation=activation_fn)
-        value_layer = tf.layers.dense(to_tensor, channels * num_heads, activation=activation_fn)
+        query_layer = tf.layers.dense(from_tensor, num_units * num_heads, activation=activation_fn)
+        key_layer = tf.layers.dense(to_tensor, num_units * num_heads, activation=activation_fn)
+        value_layer = tf.layers.dense(to_tensor, num_units * num_heads, activation=activation_fn)
 
         # shape [batch_size*num_heads, max_length, channels]
         query_layer_ = tf.concat(tf.split(query_layer, num_heads, axis=2), axis=0)
@@ -172,13 +178,14 @@ def multi_head_attention(from_tensor: tf.Tensor,  to_tensor: tf.Tensor, channels
         # attention masks
         attention_masks = tf.sign(tf.reduce_sum(to_tensor, axis=-1))
         attention_masks = tf.tile(attention_masks, [num_heads, 1])
-        attention_masks = tf.tile(tf.expand_dims(attention_masks, axis=1), [1, channels, 1])
+        attention_masks = tf.tile(tf.expand_dims(attention_masks, axis=1), [1, tf.shape(from_tensor)[1], 1])
         neg_inf_matrix = tf.multiply(tf.ones_like(attention_scores), (-math.pow(2, 32) + 1))
         attention_scores = tf.where(tf.equal(attention_masks, 0), neg_inf_matrix, attention_scores)
 
         if causality:
             diag_vals = tf.ones_like(attention_scores[0, :, :])
-            tril = tf.contrib.linalg.LinearOperatorTriL(diag_vals).to_dense()
+            tril = tf.linalg.LinearOperatorLowerTriangular(diag_vals).to_dense()
+
             masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(attention_scores)[0], 1, 1])
             neg_inf_matrix = tf.multiply(tf.ones_like(masks), (-math.pow(2, 32) + 1))
             attention_scores = tf.where(tf.equal(masks, 0), neg_inf_matrix, attention_scores)
@@ -191,7 +198,7 @@ def multi_head_attention(from_tensor: tf.Tensor,  to_tensor: tf.Tensor, channels
         # shape = [N*h, T_q]
         query_masks = tf.tile(query_masks, [num_heads, 1])
         # shape = [N*h, T_q, T_k]
-        query_masks = tf.tile(tf.expand_dims(query_masks, -1), [1, 1, channels])
+        query_masks = tf.tile(tf.expand_dims(query_masks, -1), [1, 1, tf.shape(to_tensor)[1]])
 
         attention_probs *= query_masks
 
@@ -202,36 +209,41 @@ def multi_head_attention(from_tensor: tf.Tensor,  to_tensor: tf.Tensor, channels
         # shape [batch_size, max_length, channels*num_heads]
         outputs = tf.concat(tf.split(outputs, num_heads, axis=0), axis=2)
 
+        # reshape to from tensor
+        outputs = tf.layers.dense(outputs, channels, activation=activation_fn)
         # Residual connection
-        outputs += query_layer
+        outputs += from_tensor
         # group normalization
         outputs = group_norm(outputs)
     return outputs
 
 
-def feed_forward(inputs, channels=None, scope="multihead_attention", activation=None, reuse=None):
+def feed_forward(inputs, channels, hidden_dims=None, scope="multihead_attention", activation=None, reuse=None):
     """
     :param inputs: [Tensor] with first dimension of "batch_size"
-    :param channels: [Int] hidden dimensions
+    :param channels: [Int] Embedding size
+    :param hidden_dims: [List] hidden dimensions
     :param scope: [String] name of "variable_scope"
     :param activation: [String] name of activate function
     :param reuse: [Boolean] tf parameter reuse
     :return: [Tensor] outputs after feed forward with shape of "batch_size * max_length * channels"
     """
-    if channels is None:
-        channels = [2048, 512]
+    if hidden_dims is None:
+        hidden_dims = [2048]
     with tf.variable_scope(scope, reuse=reuse):
         activation_fn = get_activation(activation)
         outputs = inputs
-        for channel in channels:
-            params = {"inputs": outputs, "num_outputs": channel, "activation_fn": activation_fn}
+        for hidden_dim in hidden_dims:
+            params = {"inputs": outputs, "num_outputs": hidden_dim, "activation_fn": activation_fn}
             outputs = tf.contrib.layers.fully_connected(**params)
+        params = {"inputs": outputs, "num_outputs": channels, "activation_fn": activation_fn}
+        outputs = tf.contrib.layers.fully_connected(**params)
         outputs += inputs
         outputs = group_norm(outputs)
     return outputs
 
 
-def label_smoothing(inputs, epsilon = 0.1):
+def label_smoothing(inputs, epsilon=0.1):
     """
     :param inputs: [Tensor]
     :param epsilon: [Float] Smoothing rate
