@@ -10,7 +10,7 @@ data_path_name = 'cv'
 pic_path_name = 'pic'
 cv_path_name = 'fer2013'
 csv_file_name = 'fer2013.csv'
-ckpt_name = 'cnn_emotion_classifier_resnet.ckpt'
+ckpt_name = 'cnn_emotion_classifier_g.ckpt'
 model_path_name = 'cnn_inuse'
 casc_name = 'haarcascade_frontalface_alt.xml'
 cv_path = os.path.join(data_folder_name, data_path_name, cv_path_name)
@@ -22,7 +22,7 @@ pic_path = os.path.join(data_folder_name, data_path_name, pic_path_name)
 channel = 1
 default_height = 48
 default_width = 48
-confusion_matrix = True
+confusion_matrix = False
 use_advanced_method = True
 emotion_labels = ['angry', 'disgust:', 'fear', 'happy', 'sad', 'surprise', 'neutral']
 num_class = len(emotion_labels)
@@ -40,7 +40,7 @@ x_input = graph.get_tensor_by_name('x_input:0')
 dropout = graph.get_tensor_by_name('dropout:0')
 logits = graph.get_tensor_by_name('project/output/logits:0')
 # logits = graph.get_tensor_by_name('resnet/logits:0')
-is_training = graph.get_tensor_by_name('is_training:0')
+# is_training = graph.get_tensor_by_name('is_training:0')
 
 
 def advance_image(images_):
@@ -70,7 +70,8 @@ def produce_result(images_):
         rsz_imgs = [images_]
     pred_logits_ = []
     for rsz_img in rsz_imgs:
-        pred_logits_.append(sess.run(tf.nn.softmax(logits), {x_input: rsz_img, dropout: 1.0, is_training: False}))
+        # pred_logits_.append(sess.run(tf.nn.softmax(logits), {x_input: rsz_img, dropout: 1.0, is_training: False}))
+        pred_logits_.append(sess.run(tf.nn.softmax(logits), {x_input: rsz_img, dropout: 1.0}))
     return np.sum(pred_logits_, axis=0)
 
 
@@ -123,6 +124,103 @@ def face_detect(image_path, casc_path_=casc_path):
         print("There is no {} in {}".format(casc_name, casc_path_))
 
 
+def show_img_after_classifier(img_path, id_=None):
+    faces, img_gray, img = face_detect(img_path)
+    spb = img.shape
+    sp = img_gray.shape
+    height = sp[0]
+    width = sp[1]
+    size = 600
+    emotion_pre_dict = {}
+    face_exists = 0
+    for (x, y, w, h) in faces:
+        face_exists = 1
+        face_img_gray = img_gray[y:y + h, x:x + w]
+        results_sum = predict_emotion(face_img_gray)  # face_img_gray
+        for i, emotion_pre in enumerate(results_sum):
+            emotion_pre_dict[emotion_labels[i]] = emotion_pre
+        # 输出所有情绪的概率
+        print(emotion_pre_dict)
+        label = np.argmax(results_sum)
+        emo = emotion_labels[int(label)]
+        print('Emotion : ', emo)
+        # 输出最大概率的情绪
+        # 使框的大小适应各种像素的照片
+        t_size = 2
+        ww = int(spb[0] * t_size / 300)
+        www = int((w + 10) * t_size / 100)
+        www_s = int((w + 20) * t_size / 100) * 2 / 5
+        cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), ww)
+        cv2.putText(img, emo, (x + 2, y + h - 2), cv2.FONT_HERSHEY_SIMPLEX,
+                    www_s, (255, 0, 255), thickness=www, lineType=1)
+        # img_gray full face     face_img_gray part of face
+    if face_exists:
+        if id_ is None:
+            cv2.namedWindow('Emotion_classifier', 0)
+            cent = int((height * 1.0 / width) * size)
+            cv2.resizeWindow('Emotion_classifier', size, cent)
+            cv2.imshow('Emotion_classifier', img)
+        else:
+            cv2.namedWindow('Emotion_classifier{}'.format(id_), 0)
+            cent = int((height * 1.0 / width) * size)
+            cv2.resizeWindow('Emotion_classifier{}'.format(id_), size, cent)
+            cv2.imshow('Emotion_classifier{}'.format(id_), img)
+        return True
+    else:
+        return False
+
+
+def actual_time_classifier():
+    cap = cv2.VideoCapture(0)
+    while True:
+        _, frame = cap.read()  # 读取一帧视频
+        if frame is None:
+            print("没有检测到摄像头")
+            return False
+        # 框住人脸的矩形边框颜色
+        color = (0, 0, 2555)
+
+        # 图像灰化，降低计算复杂度
+        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # 使用人脸识别分类器，读入分类器
+        cascade = cv2.CascadeClassifier(casc_path)
+
+        # 利用分类器识别出哪个区域为人脸
+        faceRects = cascade.detectMultiScale(frame_gray, scaleFactor=1.1,
+                                             minNeighbors=1, minSize=(120, 120))
+        if len(faceRects) > 0:
+            emotion_pre_dict = {}
+            for faceRect in faceRects:
+                x, y, w, h = faceRect
+                # 截取脸部图像提交给模型识别这是谁
+                image_g = frame_gray[y: y + h, x: x + w]
+                results_sum = predict_emotion(image_g)  # predict
+                for i, emotion_pre in enumerate(results_sum):
+                    emotion_pre_dict[emotion_labels[i]] = emotion_pre
+                    # 输出所有情绪的概率
+                print(emotion_pre_dict)
+                label = np.argmax(results_sum)
+                emo = emotion_labels[int(label)]
+                print('Emotion : ', emo)
+                cv2.rectangle(frame, (x - 10, y - 10), (x + w + 10, y + h + 10), color, thickness=2)
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                # 文字提示是谁
+                cv2.putText(frame, '%s' % emo, (x + 30, y + 30), font, 1, (255, 0, 255), 4)
+        cv2.imshow("识别朕的表情！", frame)
+
+        # 等待10毫秒看是否有按键输入
+        k = cv2.waitKey(30)
+        # 如果输入q则退出循环
+        if k & 0xFF == ord('q'):
+            break
+
+    # 释放摄像头并销毁所有窗口
+    cap.release()
+    cv2.destroyAllWindows()
+    return True
+
+
 if __name__ == '__main__':
     if not confusion_matrix:
         images_path = []
@@ -131,44 +229,10 @@ if __name__ == '__main__':
             if file.lower().endswith('jpg') or file.endswith('png'):
                 images_path.append(os.path.join(pic_path, file))
         for image in images_path:
-            faces, img_gray, img = face_detect(image)
-            spb = img.shape
-            sp = img_gray.shape
-            height = sp[0]
-            width = sp[1]
-            size = 600
-            emotion_pre_dict = {}
-            face_exists = 0
-            for (x, y, w, h) in faces:
-                face_exists = 1
-                face_img_gray = img_gray[y:y + h, x:x + w]
-                results_sum = predict_emotion(face_img_gray)  # face_img_gray
-                for i, emotion_pre in enumerate(results_sum):
-                    emotion_pre_dict[emotion_labels[i]] = emotion_pre
-                # 输出所有情绪的概率
-                print(emotion_pre_dict)
-                label = np.argmax(results_sum)
-                emo = emotion_labels[int(label)]
-                print('Emotion : ', emo)
-                # 输出最大概率的情绪
-                # 使框的大小适应各种像素的照片
-                t_size = 2
-                ww = int(spb[0] * t_size / 300)
-                www = int((w + 10) * t_size / 100)
-                www_s = int((w + 20) * t_size / 100) * 2 / 5
-                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), ww)
-                cv2.putText(img, emo, (x + 2, y + h - 2), cv2.FONT_HERSHEY_SIMPLEX,
-                            www_s, (255, 0, 255), thickness=www, lineType=1)
-                # img_gray full face     face_img_gray part of face
-            if face_exists:
-                cv2.namedWindow('Emotion_classifier', 0)
-                cent = int((height * 1.0 / width) * size)
-                cv2.resizeWindow('Emotion_classifier', size, cent)
-                cv2.imshow('Emotion_classifier', img)
-                k = cv2.waitKey(0)
-                cv2.destroyAllWindows()
-                # if k & 0xFF == ord('q'):
-                #     break
+            show_img_after_classifier(image)
+            cv2.waitKey()
+            # if k & 0xFF == ord('q'):
+            #     break
     if confusion_matrix:
         with open(csv_path, 'r') as f:
             csvr = csv.reader(f)

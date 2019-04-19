@@ -6,13 +6,14 @@ import pickle
 
 tf_config = tf.ConfigProto(allow_soft_placement=True)
 tf_config.gpu_options.allow_growth = True
+tf.reset_default_graph()
 
 data_folder_name = '..\\temp'
 data_path_name = 'cn_nlp\\translate'
-vocab_name_cn = 'translate_cn.pkl'
-vocab_name_en = 'translate_en.pkl'
-train_record_name = 'translate_cn_en_train.tfrecord'
-test_record_name = 'translate_cn_en_test.tfrecord'
+vocab_name_cn = 'translate_cn_50.pkl'
+vocab_name_en = 'translate_en_50.pkl'
+train_record_name = 'translate_cn_en_train_50.tfrecord'
+test_record_name = 'translate_cn_en_test_50.tfrecord'
 
 vocab_path_cn = os.path.join(data_folder_name, data_path_name, vocab_name_cn)
 vocab_path_en = os.path.join(data_folder_name, data_path_name, vocab_name_en)
@@ -29,17 +30,20 @@ with open(vocab_path_en, 'rb') as f:
     word_dict_en = pickle.load(f)
 
 
+retrain_flag = True
+
+
 class ConfigModel(object):
     vocab_size_en = len(word_dict_en)
     vocab_size_de = len(word_dict_cn)
     channels = 400
     learning_rate = 0.001
-    layer_num = 6
+    layer_num = 4
     is_training = True
-    shuffle_pool_size = 256
+    shuffle_pool_size = 2560
     dropout_rate = 0.1
     num_heads = 8
-    batch_size = 64
+    batch_size = 128
     max_length = 50
 
 
@@ -81,27 +85,41 @@ def main(argv):
         handle = tf.placeholder(tf.string, shape=[])
         iterator = tf.data.Iterator.from_string_handle(handle, data_set_train.output_types,
                                                        data_set_train.output_shapes)
+        # cn     en        cn_len       en_len
         text_, label_, text_length, label_length = iterator.get_next()
-        transf = Transformer(text_, label_, pm=pm)
-
-        saver = tf.train.Saver(max_to_keep=1)
+        transf = Transformer(label_, text_, pm=pm)
         sess.run(tf.global_variables_initializer())
-        for i in range(1000):
+        # =================================
+        # graph = tf.get_default_graph()
+        # a = sess.run(graph.get_tensor_by_name("encoder/en_embed/lookup_table:0"))
+        # # trainable_var = tf.trainable_variables()
+        # =================================
+
+        if retrain_flag:
+            print("================retraining================")
+            restore_saver = tf.train.Saver()
+            restore_saver.restore(sess, os.path.join(model_save_path, model_name.format("0")))
+            # ==============================================
+            # b = sess.run(graph.get_tensor_by_name("encoder/en_embed/lookup_table:0"))
+            # ==============================================
+        saver = tf.train.Saver(max_to_keep=1)
+        for i in range(5000):
 
             sess.run(transf.train_op, {handle: train_handle})
-            if (i+1) % 10 == 0:
-                train_predict_out, train_loss = sess.run([transf.preds, transf.loss], {handle: train_handle})
+            if (i+1) % 20 == 0:
+                train_predict_out, train_loss = sess.run([transf.preds, transf.mean_loss], {handle: train_handle})
                 test_x_batch, test_y_batch, test_x_batch_len, test_y_batch_len = \
                     sess.run([text_, label_, text_length, label_length], {handle: train_handle})
+                print("Loss: {}".format(train_loss))
                 print('Generation {} # {}. \n Target : {} . \n Out : {}'.
                       format(i, numbers_to_text([test_x_batch[0][:test_x_batch_len[0]]], word_dict_cn),
                              numbers_to_text([test_y_batch[0][:test_y_batch_len[0]]], word_dict_en),
-                             numbers_to_text([train_predict_out[0]], word_dict_en),
+                             numbers_to_text([train_predict_out[0]], word_dict_cn),
                              ))
                 print('Generation {} # {}. \n Target : {} . \n Out : {}'.
                       format(i, numbers_to_text([test_x_batch[1][:test_x_batch_len[1]]], word_dict_cn),
                              numbers_to_text([test_y_batch[1][:test_y_batch_len[1]]], word_dict_en),
-                             numbers_to_text([train_predict_out[1]], word_dict_en),
+                             numbers_to_text([train_predict_out[1]], word_dict_cn),
                              ))
         saver.save(sess, os.path.join(model_save_path, model_name.format("0")))
 

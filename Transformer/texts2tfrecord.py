@@ -1,4 +1,4 @@
-from Encoder_Decoder import text_helper
+from Transformer import text_helper
 import tensorflow as tf
 import numpy as np
 from tensorflow.python.framework import ops
@@ -12,10 +12,10 @@ sess = tf.Session()
 create_tfrecord = True
 data_folder_name = '..\\temp'
 data_path_name = 'cn_nlp\\translate'
-vocab_name_cn = 'translate_cn.pkl'
-vocab_name_en = 'translate_en.pkl'
-train_record_name = 'translate_cn_en_train.tfrecord'
-test_record_name = 'translate_cn_en_test.tfrecord'
+vocab_name_cn = 'translate_cn_50.pkl'
+vocab_name_en = 'translate_en_50.pkl'
+train_record_name = 'translate_cn_en_train_50.tfrecord'
+test_record_name = 'translate_cn_en_test_50.tfrecord'
 
 vocab_path_cn = os.path.join(data_folder_name, data_path_name, vocab_name_cn)
 vocab_path_en = os.path.join(data_folder_name, data_path_name, vocab_name_en)
@@ -70,9 +70,9 @@ def write_binary(record_name, texts_, target_, text_lens_, target_lens_):
         example = tf.train.Example(
             features=tf.train.Features(
                 feature={
-                    "text": tf.train.Feature(int64_list=tf.train.Int64List(value=text)),
+                    "text": tf.train.Feature(int64_list=tf.train.Int64List(value=text+[word_dict_cn['_EOS']])),
                     "label": tf.train.Feature(int64_list=tf.train.Int64List(value=target_[it]+[word_dict_en['_EOS']])),
-                    "text_length": tf.train.Feature(int64_list=tf.train.Int64List(value=[text_lens_[it]])),
+                    "text_length": tf.train.Feature(int64_list=tf.train.Int64List(value=[text_lens_[it]+1])),
                     "label_length": tf.train.Feature(int64_list=tf.train.Int64List(value=[target_lens_[it]+1]))
                 }
             )
@@ -95,20 +95,24 @@ def __parse_function(serial_exmp):
     return text_, label_, text_lens_, label_lens_
 
 
-write_binary(train_record_name, cn_data_num, en_data_num, cn_len, en_len)
-write_binary(test_record_name, test_cn_data_num, test_en_data_num, test_cn_len, test_en_len)
+if create_tfrecord:
+    print("creating tfrecord")
+    write_binary(train_record_name, cn_data_num, en_data_num, cn_len, en_len)
+    write_binary(test_record_name, test_cn_data_num, test_en_data_num, test_cn_len, test_en_len)
+    # write_binary(train_record_name, en_data_num, cn_data_num, en_len, cn_len)
+    # write_binary(test_record_name, test_en_data_num, test_cn_data_num, test_en_len, test_cn_len)
 # exit()
 record_path = os.path.join(data_folder_name, data_path_name, train_record_name)
 dataset = tf.data.TFRecordDataset(record_path)
 dataset = dataset.map(__parse_function)
 data_train = dataset.shuffle(1000).repeat(10).padded_batch(1, padded_shapes=([None], [None], [], []))
 iter_train = data_train.make_one_shot_iterator()
-# text_data, label_data = iter_train.get_next()
-# with tf.Session() as sess:
-#     for i in range(10):
-#         print(sess.run([text_data, label_data]))
-#         print(sess.run(tf.shape(text_data)))
-#         # print(sess.run(iterator))
+text_data, label_data,_,_ = iter_train.get_next()
+with tf.Session() as sess:
+    for i in range(10):
+        print(sess.run([text_data, label_data]))
+        print(sess.run(tf.shape(text_data)))
+        # print(sess.run(iterator))
 # print('')
 
 

@@ -13,3 +13,7 @@ with tf.Session() as sess:
     vv = sess.run(vvv)
     print(vv)
     # print(sess.run(tf.multiply(a, b)))
+
+a = [1, 2, 3]
+a = a+[2]*3
+print(1)

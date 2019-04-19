@@ -229,7 +229,7 @@ def feed_forward(inputs, channels, hidden_dims=None, scope="multihead_attention"
     :return: [Tensor] outputs after feed forward with shape of "batch_size * max_length * channels"
     """
     if hidden_dims is None:
-        hidden_dims = [2048]
+        hidden_dims = []
     with tf.variable_scope(scope, reuse=reuse):
         activation_fn = get_activation(activation)
         outputs = inputs

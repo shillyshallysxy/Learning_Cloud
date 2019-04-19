@@ -59,3 +59,56 @@ class Transformer():
             self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
                                                     beta1=0.9, beta2=0.98, epsilon=1e-8)
             self.train_op = self.optimizer.minimize(self.mean_loss, global_step=self.global_step)
+
+
+class TransformerSNLI():
+    def __init__(self, inputs1, inputs2, label, pm):
+        self.inputs1 = tf.to_int32(inputs1)
+        self.inputs2 = tf.to_int32(inputs2)
+        self.target = tf.to_int32(label)
+        self.vocab_size_en = pm.vocab_size_en
+        self.channels = pm.channels
+        self.num_heads = pm.num_heads
+        self.dropout_rate = pm.dropout_rate
+        self.is_training = pm.is_training
+        self.num_layer = pm.layer_num
+        self.learning_rate = pm.learning_rate
+        with tf.variable_scope("encoder"):
+            self.encode1 = get_embedding(self.inputs1, self.vocab_size_en, self.channels, scope="en_embed")
+            self.encode1 += get_positional_encoding(self.inputs1, self.channels, scope="en_pe")
+            for i in range(self.num_layer):
+                with tf.variable_scope("encoder_layer_{}".format(i)):
+                    self.encode1 = multi_head_attention(self.encode1, self.encode1, self.channels,
+                                                        num_heads=self.num_heads,
+                                                        dropout_rate=self.dropout_rate,
+                                                        is_training=self.is_training,
+                                                        causality=False)
+                    self.encode1 = feed_forward(self.encode1, self.channels)
+                    self.max_pool1 = tf.layers.max_pooling1d(self.encode1, pool_size=pm.max_length, strides=1)
+                    self.max_pool1 = tf.reshape(self.max_pool1, [-1, self.channels])
+        with tf.variable_scope("encoder", reuse=True):
+            self.encode2 = get_embedding(self.inputs2, self.vocab_size_en, self.channels, scope="en_embed", reuse=True)
+            self.encode2 += get_positional_encoding(self.inputs2, self.channels, scope="en_pe", reuse=True)
+            for i in range(self.num_layer):
+                with tf.variable_scope("encoder_layer_{}".format(i)):
+                    self.encode2 = multi_head_attention(self.encode2, self.encode2, self.channels,
+                                                        num_heads=self.num_heads,
+                                                        dropout_rate=self.dropout_rate,
+                                                        is_training=self.is_training,
+                                                        causality=False, reuse=True)
+                    self.encode2 = feed_forward(self.encode2, self.channels, reuse=True)
+                    self.max_pool2 = tf.layers.max_pooling1d(self.encode2, pool_size=pm.max_length, strides=1)
+                    self.max_pool2 = tf.reshape(self.max_pool2, [-1, self.channels])
+
+        sub_pool = tf.subtract(self.max_pool1, self.max_pool2)
+        mul_pool = tf.multiply(self.max_pool1, self.max_pool2)
+        self.output = tf.concat([self.max_pool1, self.max_pool2, sub_pool, mul_pool], axis=1)
+        self.output = tf.layers.dense(self.output, self.channels)
+        self.output = tf.layers.dense(self.output, pm.num_tags)
+        self.preds = tf.argmax(self.output, axis=1)
+        if self.is_training:
+            self.loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, self.target))
+            self.global_step = tf.Variable(0, name='global_step', trainable=False)
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                    beta1=0.9, beta2=0.98, epsilon=1e-8)
+            self.train_op = self.optimizer.minimize(self.loss, global_step=self.global_step)
