@@ -13,15 +13,13 @@ ops.reset_default_graph()
 
 data_folder_name = '..\\temp'
 data_path_name = 'cn_nlp\\translate'
-vocab_name_cn = 'translate_cn.pkl'
-vocab_name_en = 'translate_en.pkl'
-train_record_name = 'translate_cn_en_train.tfrecord'
-test_record_name = 'translate_cn_en_test.tfrecord'
+vocab_name_cn = 'translate_cn_50.pkl'
+vocab_name_en = 'translate_en_50.pkl'
+train_record_name = 'translate_cn_en_train_50.tfrecord'
+test_record_name = 'translate_cn_en_test_50.tfrecord'
 
 vocab_path_cn = os.path.join(data_folder_name, data_path_name, vocab_name_cn)
 vocab_path_en = os.path.join(data_folder_name, data_path_name, vocab_name_en)
-model_save_path = os.path.join(data_folder_name, data_path_name, 'translate.ckpt')
-model_log_path = os.path.join(data_folder_name, data_path_name, 'model_log.txt')
 
 with open(vocab_path_cn, 'rb') as f:
     word_dict_cn = pickle.load(f)
@@ -32,18 +30,29 @@ with open(vocab_path_en, 'rb') as f:
 # Start a graph session
 sess = tf.Session()
 
-word_dict = word_dict_cn
+# 是否使用英文语料：
+# en_flag = 'cn'
+en_flag = 'en'
+# name = 'skipgram'
+name = 'cbow'
+retrain_flag = True
+window_size = 4       # How many words to consider left and right.
+
+if en_flag == 'en':
+    print("使用英语词典")
+    word_dict = word_dict_en
+else:
+    print("使用中文词典")
+    word_dict = word_dict_cn
 # Declare model parameters
-batch_size = 256
+batch_size = 128
 shuffle_pool_size = 2000
-embedding_size = 100
+embedding_size = 400
 vocabulary_size = len(word_dict)
-generations = 20000
+generations = 10000
 model_learning_rate = 0.001
 
 num_sampled = int(batch_size/2)    # Number of negative examples to sample.
-window_size = 3       # How many words to consider left and right.
-name = 'skipgram'
 # Add checkpoints to training
 save_embeddings_every = 2000
 print_valid_every = 2000
@@ -77,12 +86,17 @@ train_handle = sess.run(data_set_train_iter.string_handle())
 
 handle = tf.placeholder(tf.string, shape=[])
 iterator = tf.data.Iterator.from_string_handle(handle, data_set_train.output_types, data_set_train.output_shapes)
-# _, texts, _, texts_length = iterator.get_next()
-texts, _, texts_length, _ = iterator.get_next()
+if en_flag == 'en':
+    print("载入英语语料")
+    _, texts, _, texts_length = iterator.get_next()
+else:
+    print("载入中文语料")
+    texts, _, texts_length, _ = iterator.get_next()
+
 
 print('Creating Model')
 # Define Embeddings:
-embeddings = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0), name='embeddings_en')
+embeddings = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0), name='embeddings_'+en_flag)
 
 # NCE loss parameters
 nce_weights = tf.Variable(tf.truncated_normal([vocabulary_size, embedding_size],
@@ -121,8 +135,10 @@ optimizer = tf.train.AdamOptimizer(learning_rate=model_learning_rate).minimize(l
 norm = tf.sqrt(tf.reduce_sum(tf.square(embeddings), 1, keepdims=True))
 normalized_embeddings = embeddings / norm
 
-# valid_words = ['love', 'hate', 'happy', 'sad', 'man', 'woman', 'one', 'good', 'death']
-valid_words = ['爱', '恨', '乐', '悲', '男', '女', '一', '好', '死']
+if en_flag == 'en':
+    valid_words = ['love', 'hate', 'happy', 'sad', 'man', 'woman', 'one', 'good', 'death']
+else:
+    valid_words = ['爱', '恨', '乐', '悲', '男', '女', '一', '好', '死']
 valid_examples = [word_dict[x] for x in valid_words]
 valid_dataset = tf.constant(valid_examples, dtype=tf.int32)
 valid_embeddings = tf.nn.embedding_lookup(normalized_embeddings, valid_dataset)
@@ -134,10 +150,15 @@ saver = tf.train.Saver()
 #Add variable initializer.
 init = tf.global_variables_initializer()
 sess.run(init)
-model_checkpoint_path = os.path.join(data_folder_name, data_path_name, name + '_embeddings_cn.ckpt')
-if False:
+# model_checkpoint_path = os.path.join(data_folder_name, data_path_name, name + '_embeddings_en.ckpt')
+model_checkpoint_path = os.path.join(data_folder_name, data_path_name, 'embeddings_{}.ckpt'.format(en_flag))
+
+# 是否加载模型
+if retrain_flag:
     print('retraining')
+    # a = sess.run(embeddings)
     saver.restore(sess, model_checkpoint_path)
+    b = sess.run(embeddings)
 # Run the CBOW model.
 print('Starting Training')
 loss_vec = []
@@ -176,7 +197,3 @@ for i in range(generations):
 
         save_path = saver.save(sess, model_checkpoint_path)
         print('Model saved in file: {}'.format(save_path))
-
-# Start logistic model-------------------------
-max_words = 20
-logistic_batch_size = 500

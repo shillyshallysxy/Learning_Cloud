@@ -15,7 +15,7 @@ def normalize_text(text):
     # Lower case
     text = text.lower()
     # Remove punctuation
-    text = ''.join(c for c in text if c not in string.punctuation)
+    text = ''.join(c if c not in string.punctuation else ' '+c for c in text)
     # Trim extra whitespace
     text = ' '.join(text.split())
     return text
@@ -36,7 +36,7 @@ def build_dictionary(sentences, language='en', vocabulary_size=60000):
     # Now add most frequent words, limited to the N-most frequent (N=vocabulary size)
     count.extend(collections.Counter(words).most_common())
     # Now create the dictionary
-    word_dict = {'_PAD': 0, '_BEGIN': 1, '_EOS': 2}
+    word_dict = {'_PAD': 0, '_BEGIN': 1, '_EOS': 2, '_CLS': 3, '_SEP': 4, '_MASK': 5}
     # For each word, that we want in the dictionary, add it, then make it
     # the value of the prior dictionary length
     for word, word_count in tqdm(count):
@@ -96,7 +96,7 @@ def numbers_to_text(sentences, word_dict):
     return data
 
 
-def load_data(folder_name='G:\python\DeepLearning\Learning_Cloud\\temp\cn_nlp\corpus\\translate\Bilingual'):
+def load_data(folder_name='..\\temp\cn_nlp\corpus\\translate\Bilingual'):
     dirs = []
     en_data = []
     en_len = []
@@ -127,7 +127,7 @@ def load_data(folder_name='G:\python\DeepLearning\Learning_Cloud\\temp\cn_nlp\co
 
 
 def load_test_data(folder_name=
-                   'G:\python\DeepLearning\Learning_Cloud\\temp\cn_nlp\corpus\\translate\Testing\Testing-Data.txt'):
+                   '..\\temp\cn_nlp\corpus\\translate\Testing\Testing-Data.txt'):
     en_data = []
     en_len = []
     cn_data = []

@@ -181,7 +181,7 @@ def load_movie_data():
 
 
 def load_data(path, path2=''):
-    data_folder_name = 'temp'
+    data_folder_name = '..\\temp'
     data_path_name = 'cn_nlp'
     lines = []
     labels = []
@@ -205,7 +205,7 @@ def load_data(path, path2=''):
             elif tag == 'E':
                 tag_num = 3
             label.append(tag_num)
-        if len(label) > 1:
+        if 200 > len(label) > 1:
             lines.append(line)
             labels.append(label)
             lens.append(len(label))
@@ -230,7 +230,7 @@ def load_data(path, path2=''):
                 elif tag == 'E':
                     tag_num = 3
                 label.append(tag_num)
-            if len(label) > 1:
+            if 200 > len(label) > 1:
                 lines.append(line)
                 labels.append(label)
                 lens.append(len(label))

@@ -17,6 +17,7 @@ cn_embeddings_save_path = os.path.join(data_folder_name, "cn_nlp\\translate", 'e
 en_embeddings_save_path = os.path.join(data_folder_name, "cn_nlp\\translate", 'embeddings_en.ckpt')
 model_save_path = os.path.join(data_folder_name, "cn_nlp\\snli")
 model_name = "snli_model_{}"
+transfer_model_save_path = os.path.join(data_folder_name, "cn_nlp\\snli", "snli_model_{}".format(1))
 vocab_path_en = os.path.join(data_folder_name, "cn_nlp\\translate", vocab_name_en)
 
 with open(vocab_path_en, 'rb') as f:
@@ -26,21 +27,19 @@ with open(vocab_path_en, 'rb') as f:
 class ConfigModel(object):
     vocab_size_en = len(word_dict_en)
     channels = 400
-    learning_rate = 0.0004
+    learning_rate = 0.001
     layer_num = 6
-    is_training = False
+    is_training = True
     is_transfer_learning = False
     restore_transfer_learning = False
-    restore_embedding = False
     shuffle_pool_size = 2560
     dropout_rate = 0.1
     num_heads = 8
     batch_size = 64
-    max_length = 50
+    max_length = 100
     num_tags = 3
 
 
-model_choose = "0"
 retrain_flag = True
 test_total_acc = True
 pm = ConfigModel()
@@ -51,11 +50,9 @@ label_to_num_dict = {'entailment': 0, "neutral": 1, 'contradiction': 2}
 
 def get_data(snli_name, pad_=False):
     sentence_1 = list()
-    len1 = list()
     sentence_2 = list()
-    len2 = list()
     label = list()
-    with open(os.path.join(data_path, snli_name), 'r') as f:
+    with open(os.path.join(data_path, snli_name), 'rb') as f:
         for item in jsonlines.Reader(f):
             if len(normalize_text(item["sentence1"])) > pm.max_length or len(normalize_text(item["sentence2"])) > pm.max_length:
                 continue
@@ -67,19 +64,16 @@ def get_data(snli_name, pad_=False):
             sentence_2.append(normalize_text(item["sentence2"]))
     en_data_num_1 = text_to_numbers(sentence_1, word_dict_en)
     en_data_num_2 = text_to_numbers(sentence_2, word_dict_en)
-    for i_ in range(len(en_data_num_1)):
-        len1.append(len(en_data_num_1[i_]))
-        len2.append(len(en_data_num_2[i_]))
 
     if pad_:
         for i in range(len(en_data_num_1)):
             en_data_num_1[i] = (en_data_num_1[i]+[0]*pm.max_length)[:pm.max_length]
 
             en_data_num_2[i] = (en_data_num_2[i]+[0]*pm.max_length)[:pm.max_length]
-    return en_data_num_1, en_data_num_2, label, len1, len2
+    return en_data_num_1, en_data_num_2, label
 
 
-def write_binary(record_name, texts_, target_, label_, len1_, len2_):
+def write_binary(record_name, texts_, target_, label_):
     writer = tf.python_io.TFRecordWriter(record_name)
     for it, text in tqdm(enumerate(texts_)):
         example = tf.train.Example(
@@ -88,8 +82,6 @@ def write_binary(record_name, texts_, target_, label_, len1_, len2_):
                     "text1": tf.train.Feature(int64_list=tf.train.Int64List(value=text)),
                     "text2": tf.train.Feature(int64_list=tf.train.Int64List(value=target_[it])),
                     "label": tf.train.Feature(int64_list=tf.train.Int64List(value=[label_[it]])),
-                    "len1": tf.train.Feature(int64_list=tf.train.Int64List(value=[len1_[it]])),
-                    "len2": tf.train.Feature(int64_list=tf.train.Int64List(value=[len2_[it]])),
                 }
             )
         )
@@ -126,10 +118,10 @@ def generate_data(d1_, d2_, lb_, batch_size_=pm.batch_size):
 if __name__ == '__main__':
     with tf.Session() as sess:
         # ===================================================================
-        test_data1, test_data2, test_label, test_len1, test_len2 = get_data(test_snli_name)
-        # write_binary(os.path.join(data_path, test_snli_name_tf), test_data1, test_data2, test_label, test_len1, test_len2)
-        # train_data1, train_data2, train_label, train_len1, train_len2 = get_data(train_snli_name)
-        # write_binary(os.path.join(data_path, train_snli_name_tf), train_data1, train_data2, train_label, train_len1, train_len2)
+        # test_data1, test_data2, test_label = get_data(test_snli_name)
+        # write_binary(os.path.join(data_path, test_snli_name_tf), test_data1, test_data2, test_label)
+        # train_data1, train_data2, train_label = get_data(train_snli_name)
+        # write_binary(os.path.join(data_path, train_snli_name_tf), train_data1, train_data2, train_label)
         # exit()
         # ===================================================================
         data_set_train = get_dataset(train_snli_name_tf)
@@ -153,16 +145,24 @@ if __name__ == '__main__':
                                                        data_set_train.output_shapes)
         # cn     en        cn_len       en_len
         input1, input2, target = iterator.get_next()
-        # a,b = sess.run([input1, input2], {handle: train_handle})
         tsl = TransformerSNLICls(input1, input2, target, pm)
         sess.run(tf.global_variables_initializer())
         saver = tf.train.Saver(max_to_keep=1)
         # 是否载入之前的模型权重
+        model_choose = "transfer_6"
         if retrain_flag:
             print("================retraining================")
             saver.restore(sess, os.path.join(model_save_path, model_name.format(model_choose)))
+        if pm.restore_transfer_learning:
+            print("loading transfer learning variables")
+            var_list = tf.trainable_variables()
+            layer_name_list = ["encoder_layer_" + str(i) for i in range(4)]
+            var_list_ = [v for v in var_list if v.name.split("/")[1] in layer_name_list]
+            var_list_ += [v for v in var_list if "lookup_table" in v.name]
+            restore_saver = tf.train.Saver(var_list_)
+            restore_saver.restore(sess, transfer_model_save_path)
         # 是否载入embedding
-        if pm.restore_embedding:
+        if False:
             print("loading embeddings")
             graph = tf.get_default_graph()
             # a = sess.run(graph.get_tensor_by_name("encoder/en_embed/lookup_table:0"))
@@ -173,34 +173,29 @@ if __name__ == '__main__':
             try:
                 total_acc = 0
                 total_num = 0
-                sum_num = 0
                 while True:
-                    tpred, tacc = sess.run([tsl.preds, tsl.acc], {handle: test_handle})
-                    sum_num += len(tpred)
-
-                    total_acc += len(tpred)*tacc
-                    total_num += len(tpred)
-                    print("Generation test: acc: {}".format(tacc))
+                    tpred, tacc, tloss = sess.run([tsl.preds, tsl.acc, tsl.loss], {handle: test_handle})
+                    total_acc += tacc
+                    total_num += 1
+                    print("Generation test: acc: {}  loss: {} ".format(tacc, tloss))
             except tf.errors.OutOfRangeError:
                 print(total_acc/total_num)
-                print(sum_num)
                 exit()
 
-        # for i in range(4000):
-        #     train_feed = {handle: train_handle}
-        #     sess.run(target, train_feed)
-
+        for i in range(8000):
+            train_feed = {handle: train_handle}
+            sess.run(target, train_feed)
         print("starting training")
-        for i in range(12000):
+        for i in range(4000):
             train_feed = {handle: train_handle}
             sess.run(tsl.train_op, train_feed)
-            if (i+1) % 100 == 0:
+            if (i+1) % 50 == 0:
                 pred, acc, loss = sess.run([tsl.preds, tsl.acc, tsl.loss], train_feed)
                 print("Generation train {} : acc: {}  loss: {} ".format(i, acc, loss))
-            if (i+1) % 200 == 0:
+            if (i+1) % 100 == 0:
                 tpred, tacc, tloss = sess.run([tsl.preds, tsl.acc, tsl.loss], {handle: test_handle})
                 print("Generation test {} : acc: {}  loss: {} ".format(i, tacc, tloss))
-            if (i+1) % 2000 == 0:
+            if (i+1) % 1000 == 0:
                 print("Generation train {} model saved ".format(i))
                 saver.save(sess, os.path.join(model_save_path, model_name.format(model_choose)))
         saver.save(sess, os.path.join(model_save_path, model_name.format(model_choose)))

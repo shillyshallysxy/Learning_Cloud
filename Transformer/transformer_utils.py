@@ -70,21 +70,38 @@ def group_norm(inputs: tf.Tensor, epsilon=1e-8, scope="layer_normalization", reu
     return outputs
 
 
-def get_positional_encoding(inputs, channels, scope="positional_embedding", reuse=None):
+def get_positional_encoding(inputs, channels, scale=False, scope="positional_embedding", reuse=None):
     """
     positional encoding
     :param inputs: [Tensor] with dimension of "batch_size * max_length"
     :param channels: [Int] Embedding size
+    :param scale: [Boolean] If True, the output will be multiplied by sqrt num_units
     :param scope: [String] name of "variable_scope"
     :param reuse: [Boolean] tf parameter reuse
     :return: [Tensor] outputs after positional encoding
     """
     N = tf.shape(inputs)[0]
     T = tf.shape(inputs)[1]
+    # with tf.variable_scope(scope, reuse=reuse):
+    #     position_signal = tf.expand_dims(get_timing_signal_1d(T, channels), axis=0)
+    #     position_signal = tf.tile(position_signal, [N, 1, 1])
+    # return position_signal
     with tf.variable_scope(scope, reuse=reuse):
-        position_signal = get_timing_signal_1d(T, channels)
-        position_signal = tf.tile(position_signal, [N, 1, 1])
-    return position_signal
+        position_ind = tf.tile(tf.expand_dims(tf.range(tf.to_int32(1), tf.add(T, 1)), 0), [N, 1])
+
+        # Convert to a tensor
+        lookup_table = tf.convert_to_tensor(get_timing_signal_1d(T, channels))
+
+        lookup_table = tf.concat((tf.zeros(shape=[1, channels]),
+                                  lookup_table[:, :]), 0)
+        position_inputs = tf.where(tf.equal(inputs, 0), tf.zeros_like(inputs), position_ind)
+
+        outputs = tf.nn.embedding_lookup(lookup_table, position_inputs)
+
+        if scale:
+            outputs = outputs * math.sqrt(channels)
+
+    return tf.cast(outputs, tf.float32)
 
 
 def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e4, start_index=0):
@@ -106,8 +123,33 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
     scaled_time = tf.expand_dims(position, 1) * tf.expand_dims(inv_timescales, 0)
     signal = tf.concat([tf.sin(scaled_time), tf.cos(scaled_time)], axis=1)
     signal = tf.pad(signal, [[0, 0], [0, tf.mod(channels, 2)]])
-    signal = tf.expand_dims(signal, axis=0)
     return signal
+
+
+def get_seg_embedding(inputs, channels, order=1, scale=True, scope="seg_embedding", reuse=None):
+    """
+    segment embedding
+    :param inputs: [Tensor] with first dimension of "batch_size"
+    :param channels: [Int] Embedding size
+    :param order: [Int] The position of the sentence in all sentences
+    :param scale: [Boolean] If True, the output will be multiplied by sqrt num_units
+    :param scope: [String] name of "variable_scope"
+    :param reuse: [Boolean] tf parameter reuse
+    :return: [Tensor] outputs of embedding of sentence with shape of "batch_size * length * channels"
+    """
+    with tf.variable_scope(scope, reuse=reuse):
+        lookup_table = tf.get_variable('lookup_table',
+                                       dtype=tf.float32,
+                                       shape=[3, channels],
+                                       initializer=tf.contrib.layers.xavier_initializer())
+        lookup_table = tf.concat((tf.zeros(shape=[1, channels], dtype=tf.float32),
+                                  lookup_table[1:, :]), 0)
+        seg_inputs = tf.where(tf.equal(inputs, 0), tf.zeros_like(inputs), tf.ones_like(inputs)*order)
+        outputs = tf.nn.embedding_lookup(lookup_table, seg_inputs)
+        if scale:
+            outputs = outputs * math.sqrt(channels)
+
+    return outputs
 
 
 def get_embedding(inputs, vocab_size, channels, scale=True, scope="embedding", reuse=None):
@@ -176,7 +218,7 @@ def multi_head_attention(from_tensor: tf.Tensor,  to_tensor: tf.Tensor, channels
         # Scale
         attention_scores = tf.multiply(attention_scores, 1.0 / tf.sqrt(float(channels)))
         # attention masks
-        attention_masks = tf.sign(tf.reduce_sum(to_tensor, axis=-1))
+        attention_masks = tf.sign(tf.abs(tf.reduce_sum(to_tensor, axis=-1)))
         attention_masks = tf.tile(attention_masks, [num_heads, 1])
         attention_masks = tf.tile(tf.expand_dims(attention_masks, axis=1), [1, tf.shape(from_tensor)[1], 1])
         neg_inf_matrix = tf.multiply(tf.ones_like(attention_scores), (-math.pow(2, 32) + 1))
@@ -229,7 +271,8 @@ def feed_forward(inputs, channels, hidden_dims=None, scope="multihead_attention"
     :return: [Tensor] outputs after feed forward with shape of "batch_size * max_length * channels"
     """
     if hidden_dims is None:
-        hidden_dims = []
+        # hidden_dims = []
+        hidden_dims = [2*channels]
     with tf.variable_scope(scope, reuse=reuse):
         activation_fn = get_activation(activation)
         outputs = inputs

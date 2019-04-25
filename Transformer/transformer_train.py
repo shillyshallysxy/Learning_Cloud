@@ -1,6 +1,6 @@
 from Transformer.transformer import Transformer
 import tensorflow as tf
-from  Transformer.text_helper import *
+from Transformer.text_helper import *
 import os
 import pickle
 
@@ -18,9 +18,10 @@ test_record_name = 'translate_cn_en_test_50.tfrecord'
 vocab_path_cn = os.path.join(data_folder_name, data_path_name, vocab_name_cn)
 vocab_path_en = os.path.join(data_folder_name, data_path_name, vocab_name_en)
 model_save_path = os.path.join(data_folder_name, data_path_name)
+transfer_model_save_path = os.path.join(data_folder_name, "cn_nlp\\snli", "snli_model_{}".format(1))
 model_name = "translate_model_{}"
-cn_embeddings_save_path = os.path.join(data_folder_name, data_path_name, 'skipgram_embeddings_cn.ckpt')
-en_embeddings_save_path = os.path.join(data_folder_name, data_path_name, 'skipgram_embeddings_en.ckpt')
+cn_embeddings_save_path = os.path.join(data_folder_name, data_path_name, 'embeddings_cn.ckpt')
+en_embeddings_save_path = os.path.join(data_folder_name, data_path_name, 'embeddings_en.ckpt')
 model_log_path = os.path.join(data_folder_name, data_path_name)
 
 with open(vocab_path_cn, 'rb') as f:
@@ -30,7 +31,7 @@ with open(vocab_path_en, 'rb') as f:
     word_dict_en = pickle.load(f)
 
 
-retrain_flag = True
+retrain_flag = False
 
 
 class ConfigModel(object):
@@ -38,8 +39,11 @@ class ConfigModel(object):
     vocab_size_de = len(word_dict_cn)
     channels = 400
     learning_rate = 0.001
-    layer_num = 4
+    layer_num = 6
     is_training = True
+    is_transfer_learning = False
+    restore_transfer_learning = True
+    restore_embedding = True
     shuffle_pool_size = 2560
     dropout_rate = 0.1
     num_heads = 8
@@ -90,11 +94,27 @@ def main(argv):
         transf = Transformer(label_, text_, pm=pm)
         sess.run(tf.global_variables_initializer())
         # =================================
+
         # graph = tf.get_default_graph()
         # a = sess.run(graph.get_tensor_by_name("encoder/en_embed/lookup_table:0"))
         # # trainable_var = tf.trainable_variables()
         # =================================
 
+        if pm.restore_transfer_learning:
+            print("loading transfer learning variables")
+            var_list = tf.trainable_variables()
+            layer_name_list = ["encoder_layer_" + str(i) for i in range(4)]
+            var_list_ = [v for v in var_list if v.name.split("/")[1] in layer_name_list]
+            var_list_ += [v for v in var_list if "en_embed/lookup_table" in v.name]
+            restore_saver = tf.train.Saver(var_list_)
+            restore_saver.restore(sess, transfer_model_save_path)
+        if pm.restore_embedding:
+            print("loading embeddings")
+            graph = tf.get_default_graph()
+            # embed_saver = tf.train.Saver({"embeddings_en": graph.get_tensor_by_name("encoder/en_embed/lookup_table:0")})
+            # embed_saver.restore(sess, en_embeddings_save_path)
+            embed_saver = tf.train.Saver({"embeddings_cn": graph.get_tensor_by_name("decoder/de_embed/lookup_table:0")})
+            embed_saver.restore(sess, cn_embeddings_save_path)
         if retrain_flag:
             print("================retraining================")
             restore_saver = tf.train.Saver()
@@ -103,8 +123,8 @@ def main(argv):
             # b = sess.run(graph.get_tensor_by_name("encoder/en_embed/lookup_table:0"))
             # ==============================================
         saver = tf.train.Saver(max_to_keep=1)
+        print("start training")
         for i in range(5000):
-
             sess.run(transf.train_op, {handle: train_handle})
             if (i+1) % 20 == 0:
                 train_predict_out, train_loss = sess.run([transf.preds, transf.mean_loss], {handle: train_handle})
@@ -121,6 +141,9 @@ def main(argv):
                              numbers_to_text([test_y_batch[1][:test_y_batch_len[1]]], word_dict_en),
                              numbers_to_text([train_predict_out[1]], word_dict_cn),
                              ))
+            if (i + 1) % 1000 == 0:
+                print('Generation {} # model saved'.format(i))
+                saver.save(sess, os.path.join(model_save_path, model_name.format("0")))
         saver.save(sess, os.path.join(model_save_path, model_name.format("0")))
 
 
