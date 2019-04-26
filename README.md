@@ -30,3 +30,7 @@ imp_rnn.py：自己撸了一个不太好用的rnn以加深理解
 cnn_nlp_tfrecord：简单复现“Learning Semantic Representations Using Convolutional Neural Networks for Web Search ”（没有word hashing）并在一个数据集上与多种不同类型的模型对了一些对比实验
 
 Transformer：复现transformer并尝试用于中英翻译
+
+snli_loader：使用transformer跑了SNLI的数据集，6层hidden_dim为400效果一般，78%准确度
+
+Bert：Bert源码，fork了阅读，并拿来尝试做一些任务，比如SNLI，随意跑了一下，达到了88.6%的准确度
